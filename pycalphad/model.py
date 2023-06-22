@@ -1478,3 +1478,710 @@ class TestModel(Model):
                                                                 for j in range(kmax)]))**2
                       for i in range(kmax)])
         self.models['test'] = scale_factor * Add(*[(varname - sol)**2 for varname, sol in self.solution.items()]) + polys
+
+
+# AMR PURE ELEMENT models
+#EINSTEIN model
+""" This model will be moved to pycalphad later
+"""
+def Einstein(Te, T):
+    # 3R value constant
+    koef = 3 * 8.314
+    # Einstein function
+    Cv_E=[]
+    Cv_E = koef * (Te / T) ** 2 * np.exp(Te / T) / (np.exp(Te / T) - 1) ** 2
+    return Cv_E
+
+def model_RWE(T,*param):
+    Theta_E = param[0]
+    a = param[1]
+    b = param[2]
+    Cp_res = Einstein(Theta_E,T) + a * T + b * T**2
+    return Cp_res
+
+def magn_model_RWE(T,*param):
+    Theta_E = param[0]
+    a = param[1]
+    b = param[2]
+    Cp_res = Einstein(Theta_E,T) + a * T + b * T**2 + CpMBosse(T)
+    return Cp_res
+
+def RWModelE(x, *param):
+    RTDB_globals['Te_final'] = param[0]
+    RTDB_globals['polya'] = param[1]
+    RTDB_globals['polyb'] = param[2]
+    if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+        CP_SRME=model_RWE(x, *param)
+    else:
+        CP_SRME=magn_model_RWE(x, *param)
+    return CP_SRME
+def model_CS(T,*param):
+    Theta_E = param[0]
+    a = param[1]
+    b = param[2]    
+    Cp_res = Einstein(Theta_E,T) + a * T + b * T**4
+    return Cp_res
+
+def magn_model_CS(T,*param):
+    Theta_E = param[0]
+    a = param[1]
+    b = param[2]    
+    Cp_res = Einstein(Theta_E,T) + a * T + b * T**4 + CpMBosse(T)
+    return Cp_res
+
+# Segmented Regression + Einstein
+def model_SRE(T,*param):
+    Theta_E = param[0]
+    k1= param[1]
+    k2= param[2]
+    alfa= param[3]
+    g= param[4]
+    #
+    CP_E_SR_final = []
+    for i in T:
+        if i < (alfa - g):
+            Cp = k1 * i
+        elif i > (alfa + g):
+            Cp = (k1 * i) + (k2 * (i - alfa))
+        else:
+            Cp = k1 * i + k2 * (i - alfa + g)**2/(4*g)
+        #E_cp=Einstein(Theta_E,T)
+        f1 = np.exp(Theta_E/i)/(np.exp(Theta_E/i)-1)**2.0
+        E_cp = 3.0 * 8.314 * (Theta_E/i)**2.0 * f1
+        #Cp_final= BentCable(T, k1, k2, alfa, g)+Einstein(Theta_E,T)
+        #print(type(E_cp), E_cp, type(Cp), Cp)
+        Cp_final=Cp+E_cp
+        CP_E_SR_final.append(Cp_final)
+    #print(CP_E_SR_final)
+    return CP_E_SR_final
+
+# Segmented Regression + Einstein
+def magn_model_SRE(T,*param):
+    Theta_E = param[0]
+    k1= param[1]
+    k2= param[2]
+    alfa= param[3]
+    g= param[4]
+    #
+    CP_E_SR_final = []
+    CP_MAG=CpMBosse(T)
+    for i in T:
+        if i < (alfa - g):
+            Cp = k1 * i
+        elif i > (alfa + g):
+            Cp = (k1 * i) + (k2 * (i - alfa))
+        else:
+            Cp = k1 * i + k2 * (i - alfa + g)**2/(4*g)
+        #E_cp=Einstein(Theta_E,T)
+        f1 = np.exp(Theta_E/i)/(np.exp(Theta_E/i)-1)**2.0
+        E_cp = 3.0 * 8.314 * (Theta_E/i)**2.0 * f1
+        #Cp_final= BentCable(T, k1, k2, alfa, g)+Einstein(Theta_E,T)
+        #print(type(E_cp), E_cp, type(Cp), Cp)
+        Cp_final=Cp+E_cp
+        CP_E_SR_final.append(Cp_final)
+    zipped= zip(CP_E_SR_final,CP_MAG)
+    CP_E_SRM_final = [x + y for (x, y) in zipped]
+    #print(CP_E_SR_final)
+    return CP_E_SRM_final
+
+def integrand(x):
+    return (x**4 * np.exp(x))/((np.exp(x) - 1)**2)
+
+
+def SRModelE(x, *param):
+    if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+        CP_SRME=model_SRE(x, *param)
+    else:
+        CP_SRME=magn_model_SRE(x, *param)
+    RTDB_globals['Te_final'] = param[0]
+    RTDB_globals['k1_final'] = param[1]
+    RTDB_globals['k2_final'] = param[2]
+    RTDB_globals['alfa_final'] = param[3]
+    RTDB_globals['g_final'] = param[4]
+    return CP_SRME
+
+def CSModelE(x, *param):
+    if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+        CP_SRME=model_CS(x, *param)
+    else:
+        CP_SRME=magn_model_CS(x, *param)
+    RTDB_globals['Te_final'] = param[0]
+    RTDB_globals['polya'] = param[1]
+    RTDB_globals['polyb'] = param[2]
+    return CP_SRME
+
+#' Magnetic contribution to heat capacity - Stable Solid
+#'
+#' @param x Temp. range
+#'
+#' @return Magnetic contribution to heat capacity
+#'
+def CpMBosse(x):
+    Smagn = 8.314 * np.log(RTDB_globals['bta'] + 1)
+    Dm = 0.33471979 + 0.49649686 * (1 / RTDB_globals['p'] - 1)
+    Cp_magn = []
+    # Checks to see if a single value or a list/array is fed which determines whether to iterate or just solve a single value
+    try:
+        len(x)
+    except TypeError:
+        Tau = x/RTDB_globals['Tc']
+        if Tau < 1:
+            Cp_m = Smagn*0.63570895*(1/RTDB_globals['p'] -1)*(2*Tau**3 + 2*Tau**9/3 + 2*Tau**15/5 + 2*Tau**21/7)/Dm
+        else:
+            Cp_m = Smagn * (2 * Tau ** (- 7) + 2 * Tau ** (- 21) / 3 + 2 * Tau ** (- 35) / 5 + 2 * Tau ** (- 49) / 7) / Dm
+        Cp_magn.append(Cp_m)
+    else:
+        for i in x:
+            Tau = i/RTDB_globals['Tc']
+            if Tau < 1:
+                Cp_m = Smagn*0.63570895*(1/RTDB_globals['p'] -1)*(2*Tau**3 + 2*Tau**9/3 + 2*Tau**15/5 + 2*Tau**21/7)/Dm
+            else:
+                Cp_m = Smagn * (2 * Tau ** (- 7) + 2 * Tau ** (- 21) / 3 + 2 * Tau ** (- 35) / 5 + 2 * Tau ** (- 49) / 7) / Dm
+            Cp_magn.append(Cp_m)
+    return Cp_magn
+
+# CP of Melting Temperature JUST FOR RW MODEL
+def CpMelt():
+    melt= RTDB_globals['TM']
+    if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+        if  melt < (RTDB_globals['alfa_final'] -RTDB_globals['g_final']):
+            Cp = RTDB_globals['k1_final'] * melt
+        elif melt > (RTDB_globals['alfa_final'] +RTDB_globals['g_final']):
+            Cp = (RTDB_globals['k1_final'] * melt) + (RTDB_globals['k2_final'] * (melt - RTDB_globals['alfa_final']))
+        else:
+            Cp = RTDB_globals['k1_final'] *melt+ RTDB_globals['k2_final'] * (melt - RTDB_globals['alfa_final'] +RTDB_globals['g_final'])**2/(4*RTDB_globals['g_final'])
+        CPTM = Einstein(RTDB_globals['Te_final'],melt) +  Cp
+    else:
+        if  melt < (RTDB_globals['alfa_final'] -RTDB_globals['g_final']):
+            Cp = RTDB_globals['k1_final'] * melt
+        elif melt > (RTDB_globals['alfa_final'] +RTDB_globals['g_final']):
+            Cp = (RTDB_globals['k1_final'] * melt) + (RTDB_globals['k2_final'] * (melt - RTDB_globals['alfa_final']))
+        else:
+            Cp = RTDB_globals['k1_final'] *melt+ RTDB_globals['k2_final'] * (melt - RTDB_globals['alfa_final'] +RTDB_globals['g_final'])**2/(4*RTDB_globals['g_final'])
+        CPTM = Einstein(RTDB_globals['Te_final'],melt) + Cp + CpMBosse(melt)
+    return CPTM
+
+#Solid phase Cp, takes into account solid melting and then plots SGTE above TM, limited availability implemented model wises
+def MSRCpSolid(x):
+    CP_TM=CpMelt()
+    print('Cp of Melting is ',+ CP_TM)
+    Cp = []#* len(x)
+    #count = range(0,len(x),1)
+    #print(count)
+    Tsol=[]
+    Cpmelt=[]
+    for i in x:
+            sigma = ((i-(RTDB_globals['TM']))/50)/(np.sqrt(1+((i - (RTDB_globals['TM'])) /(RTDB_globals['a_sig']))**2))
+            if i < RTDB_globals['TM']:
+                Tsol.append(i)
+                #Cpi = magn_model_SRE(i,RTDB_globals['Te_final'],RTDB_globals['k1_final'],RTDB_globals['k2_final'],RTDB_globals['g_final'],RTDB_globals['alfa_final'])
+                #print(i,Cpi)
+                #Cp.append(float(Cpi))
+            elif i >= RTDB_globals['TM'] and i <= RTDB_globals['Th']:
+                Cpi = CP_TM * (1-sigma) + sigma*(RTDB_globals['FC'])                
+                #print("Above Tm ", +Cpf)
+                Cpmelt.append(float(Cpi))
+    #print("Sigma=", sigma)
+    Cpsol = SRModelE(Tsol,RTDB_globals['Te_final'],RTDB_globals['k1_final'],RTDB_globals['k2_final'],RTDB_globals['alfa_final'],RTDB_globals['g_final'])
+    #print(Cpsol[0])
+    #print("Tsol =",Tsol)
+    Cp=Cpsol+Cpmelt
+    return Cp
+
+# S, H, G Einstein Computations from Cp
+def HEin(Te,x):
+    # ' Enthalpy_Einstein
+    # '
+    # ' @param Te Einstein temperature
+    # ' @param x Temp range
+    # '
+    # ' @return Enthalpy_Einstein
+    koef = 3*8.314
+    he = koef*Te/(np.exp(Te/x)-1)
+    return he
+
+def SEin(Te,x):
+    # ' Entropy_Einstein
+    # '
+    # ' @param Te Einstein temperature
+    # ' @param x Temp range
+    # '
+    # ' @return Entropy_Einstein
+    e1=np.exp(Te/x)
+    e2=e1-1
+    koef = 3*8.314
+    se = -1*koef* (np.log(e2) - Te * e1/(x * e2))
+    return se
+
+def GEin(Te,x):
+    # ' Gibbs_Einstein
+    # '
+    # ' @param Te Einstein temperature
+    # ' @param x Temp range
+    # '
+    # ' @return Gibbs_Einstein
+    koef = 3*8.314
+    Ge = koef*(x*np.log(np.exp(Te/x)-1)-Te) - HEin(Te, 298.15)
+    return Ge
+
+# Bent Cable Model ONLY H, S, G
+def HTBCM(x, k1, k2, alfa, g):
+    #' Enthalpy SR model
+    #
+    #  @param x,
+    #  @param k1
+    #  @param k2
+    #  @param alfa
+    #  @param g
+    #
+    H = []
+    R = 8.314
+    try:
+        len(x)
+    except TypeError:
+        if x < alfa - g:
+            Hi = 1/2 * k1 * x**2
+            H.append(Hi)
+        elif (alfa - g) < x and x <= alfa+g:
+            Hi = 1/2 * k1 * x**2 + 1/12 * k2 * (x-alfa+g)**3/g
+            H.append(Hi)
+        elif x > alfa+g:
+            Hi = 1/2*k1*x**2 + k2 * (1/2 * x**2 - alfa * x) + 1/6 * k2 * g ** 2.0 + 1/2 * k2 * alfa ** 2
+            H.append(Hi)
+    else:
+        for i in x:
+            if i < alfa - g:
+                Hi = 1/2 * k1 * i**2
+                H.append(Hi)
+            elif (alfa - g) < i and i <= alfa+g:
+                Hi = 1/2 * k1 * i**2 + 1/12 * k2 * (i-alfa+g)**3/g
+                H.append(Hi)
+            elif i > alfa+g:
+                Hi = 1/2*k1*i**2 + k2 * (1/2 * i**2 - alfa * i) + 1/6 * k2 * g ** 2.0 + 1/2 * k2 * alfa ** 2
+                H.append(Hi)
+    return H
+def STBCM(x,k1,k2,alfa,g):
+    #' Entropy SR model
+    #
+    #  @param x,
+    #  @param k1
+    #  @param k2
+    #  @param alfa
+    #  @param g
+    #
+    R = 8.314
+    try:
+        len(x)
+    except TypeError:
+        if x < alfa - g:
+            S = k1*x
+        elif alfa-g <= x and x <= alfa +g:
+            S = (alfa -g)**2.0*(3.0*k2/(8.0*g) - k2 *np.log(alfa-g)/(4*g))+(k1-k2*(alfa-g)/(2.0*g))*x+k2/(8.0*g)*x**2+k2/(4.0*g)*(alfa-g)**2.0*np.log(x)
+        elif x > alfa+g:
+            S = (-3.0*k2*alfa/2 - k2/(4.0*g)*((alfa-g)**2 * np.log(alfa-g)-(alfa+g)**2*np.log(alfa+g)))+(k1+k2)*x-k2*alfa*np.log(x)
+    else:
+        S = []
+        for i in x:
+            if i < alfa - g:
+                Si = k1*i
+                S.append(Si)
+            elif alfa-g <= i and i <= alfa +g:
+                Si = (alfa -g)**2.0*(3.0*k2/(8.0*g) - k2 *np.log(alfa-g)/(4*g))+(k1-k2*(alfa-g)/(2.0*g))*i+k2/(8.0*g)*i**2+k2/(4.0*g)*(alfa-g)**2.0*np.log(i)
+                S.append(Si)
+            elif i > alfa+g:
+                Si = (-3.0*k2*alfa/2 - k2/(4.0*g)*((alfa-g)**2 * np.log(alfa-g)-(alfa+g)**2*np.log(alfa+g)))+(k1+k2)*i-k2*alfa*np.log(i)
+                S.append(Si)
+    return S
+
+#===============================================================================
+#
+### --------------------------- Temp * Entropy T*S(T) --------------------------
+#
+def TSTBCM(x, k1, k2, alfa, g):
+    R = 8.314
+    try:
+        len(x)
+    except TypeError:
+        if x < alfa - g:
+            S = k1*x**2
+        elif alfa-g <= x and x <= alfa +g:
+            S = (alfa -g)**2.0*(3.0*k2/(8.0*g) - k2 *np.log(alfa-g)/(4*g))*x+(k1-k2*(alfa-g)/(2.0*g))*x**2+k2/(8.0*g)*x**3.0+k2/(4.0*g)*(alfa-g)**2.0*x*np.log(x)
+        elif x > alfa+g:
+            S = (-3.0*k2*alfa/2 - k2/(4.0*g)*((alfa-g)**2 * np.log(alfa-g)-(alfa+g)**2*np.log(alfa+g)))*x+(k1+k2)*x**2-k2*alfa*x*np.log(x)
+    else:
+        S = []
+        for i in x:
+            if i < alfa - g:
+                Si = k1*i**2
+                S.append(Si)
+            elif alfa-g <= i and i <= alfa +g:
+                Si = (alfa -g)**2.0*(3.0*k2/(8.0*g) - k2 *np.log(alfa-g)/(4*g))*i+(k1-k2*(alfa-g)/(2.0*g))*i**2+k2/(8.0*g)*i**3.0+k2/(4.0*g)*(alfa-g)**2.0*i*np.log(i)
+                S.append(Si)
+            elif i > alfa+g:
+                Si = (-3.0*k2*alfa/2 - k2/(4.0*g)*((alfa-g)**2 * np.log(alfa-g)-(alfa+g)**2*np.log(alfa+g)))*i+(k1+k2)*i**2-k2*alfa*i*np.log(i)
+                S.append(Si)
+    return S
+
+def GTBCM(x, k1, k2, alfa, g):
+    G=[]
+    try:
+        len(x)
+    except TypeError:
+        G2 = HTBCM(x, k1, k2, alfa, g) - TSTBCM(x,k1,k2,alfa,g) - HTBCM(298.15, k1, k2, alfa, g)
+    else:
+        for i in x:
+            Gi = HTBCM(i, k1, k2, alfa, g) - TSTBCM(i,k1,k2,alfa,g) - HTBCM(298.15, k1, k2, alfa, g)
+            G.append(Gi)
+            G2=[]
+            for i in range(len(G)):
+                G2.append(G[i][0])
+    return G2
+
+#Magnetic S, H, G
+def GibbsM_Bosse(x):
+    # ' Magnetic contribution to Gibbs energy - Stable Solid
+    # '
+    # ' @param x Temp. range
+    # '
+    # ' @return Magnetic contribution to Gibbs energy
+    # '
+    try:
+        len(x)
+    except TypeError:
+        #print('single point, len(x) caused an error')
+        Smagn = 8.314*x*np.log(RTDB_globals['bta']+1)
+        Tau = x/RTDB_globals['Tc']
+        Dm = 0.33471979 + 0.49649686*(1/RTDB_globals['p']-1)
+
+        if Tau > 1:
+            gMagn = -(Tau**(-7.0)/21 + Tau**(-21.0)/630 + Tau**(-35.0)/2975 + Tau**(-49.0)/8232)/Dm
+        else:
+            gMagn = 1-(0.38438376*Tau**(-1.0)/RTDB_globals['p'] + 0.63570895 *(1/RTDB_globals['p']-1)*(Tau**3/6 + Tau**9/135 + Tau**15/600 +Tau**21/1617))/Dm
+        GibbsM = Smagn*gMagn
+    else:
+        #print('more than 1')
+        GibbsM=[]
+        for i in x:
+            Smagn = 8.314*i*np.log(RTDB_globals['bta']+1)
+            Tau = i/RTDB_globals['Tc']
+            Dm = 0.33471979 + 0.49649686*(1/RTDB_globals['p']-1)
+            if Tau > 1:
+                gMagn = -(Tau**(-7.0)/21 + Tau**(-21.0)/630 + Tau**(-35.0)/2975 + Tau**(-49.0)/8232)/Dm
+                #print(gMagn)
+            else:
+                gMagn = 1-(0.38438376*Tau**(-1.0)/RTDB_globals['p'] + 0.63570895 *(1/RTDB_globals['p']-1)*(Tau**3/6 + Tau**9/135 + Tau**15/600 +Tau**21/1617))/Dm
+            Gibbs1 = Smagn*gMagn
+            #print(type(Gibbs1),Gibbs1)
+            GibbsM.append(Gibbs1)
+    return GibbsM
+
+def SM(x):
+    # ' Magnetic contribution to Entropy - Stable Solid
+    # '
+    # ' @param x Temp. range
+    # '
+    # ' @return Magnetic contribution to Entropy
+    # '
+    # Translated not checked
+    GM=GibbsM_Bosse(x)
+    npGM=np.array(GM)
+    Si=-1*npGM
+    #print(Si)
+    try:
+        len(x)
+    except TypeError:
+        Sgrad = np.gradient(Si,x)
+        return Sgrad
+    else:
+        Sgrad = np.gradient(Si, x)
+        return Sgrad
+def HM(x):
+    # ' Magnetic contribution to Enthalpy - Stable Solid
+    # '
+    # ' @param x Temp. range
+    # '
+    # ' @return Magnetic contribution to Enthalpy
+    GM=GibbsM_Bosse(x)
+    Hi = GM+x*SM(x)
+    return Hi
+def GM_Bosse(x):
+    # ' Magnetic contribution to Gibbs energy (Corrected) - Stable Solid
+    # '
+    # ' @param x Temp. range
+    # '
+    # ' @return Magnetic contribution to Gibbs energy (Corrected)
+    gm_res = GibbsM_Bosse(x) - HM(298.15)
+    return gm_res
+
+# RW model H, S, G
+def HTRWM(x, a, b):
+    # Ringwald Workshop model contribution to Enthalpy
+    # param x Temp. range
+    # param a fit term from model
+    # param b fit term from model
+    # return RW model contribution to enthalpy
+    H = []
+    R = 8.314
+    try:
+        len(x)
+    except TypeError:
+        Hi = 1/2* a * x**2 + 1/3* b * x**3 #Integrate Cp
+        H.append(Hi)
+    else:
+        for i in x:
+            Hi= 1/2* a * i**2 + 1/3* b * i**3 #integrate Cp
+            H.append(Hi)
+    return H
+def STRWM(x,a,b):
+    # Ringwald Workshop model contribution to Entropy
+    # param x Temp. range
+    # param a fit term from model
+    # param b fit term from model
+    # return RW model contribution to entropy
+    S = []
+    S0=0
+    try:
+        len(x)
+    except TypeError:
+        Si=a*x+1/2*b*x**2+S0
+        #S0=???
+        S.append(Si)
+    else:
+        for i in x:
+            Si=a*i+1/2*b*i**2
+            S.append(Si)
+    return S
+def TSRWM(x,a,b):
+    # Ringwald Workshop model contribution to Entropy * temperature for G calculation
+    # param x Temp. range
+    # param a fit term from model
+    # param b fit term from model
+    # return RW model contribution to entropy
+    TS=[]
+    for i in x:
+        TSi=np.array(STRWM(i,a,b))*i
+        TSi2=float(TSi)
+        TS.append(TSi2)
+    return TS
+def GTRWM(x,a,b):
+    # Ringwald Workshop model contribution to Gibbs Energy
+    # param x Temp. range
+    # param a fit term from model
+    # param b fit term from model
+    # return RW model contribution to Gibbs Energy
+    H=np.array(HTRWM(x,a,b))-HTRWM(298.15,a,b)
+    print(H[0],type(H),len(H))
+    TS=np.array(TSRWM(x,a,b))
+    print(TS[0],type(TS),len(TS))
+    G=H-TS
+    return G
+
+# CS model H, S, G
+def HTCSM(x,a,b):
+    # Chen-Sundman Workshop model contribution to Enthalpy
+    # param x Temp. range
+    # param a fit term from model
+    # param b fit term from model
+    # return CS model contribution to enthalpy
+    H = []
+    try:
+        len(x)
+    except TypeError:
+        Hi = 1/2* a * x**2 + 1/5* b * x**5 #Integrate Cp
+        H.append(Hi)
+    else:
+        for i in x:
+            Hi= 1/2* a * i**2 + 1/5* b * i**5 #integrate Cp
+            H.append(Hi)
+    return H
+def STCSM(x,a,b):
+    # Chen-Sundman Workshop model contribution to Entropy
+    # param x Temp. range
+    # param a fit term from model
+    # param b fit term from model
+    # return CS model contribution to entropy
+    S = []
+    #S0=0
+    try:
+        len(x)
+    except TypeError:
+        Si=a*x+1/4*b*x**4#+S0
+        #S0=???
+        S.append(Si)
+    else:
+        for i in x:
+            Si=a*i+1/4*b*i**4
+            S.append(Si)
+    return S
+def TSCSM(x,a,b):
+    # Chen-Sundman Workshop model contribution to Entropy multiplied by Temp for Gibbs Calculation
+    # param x Temp. range
+    # param a fit term from model
+    # param b fit term from model
+    # return CS model contribution to entropy*Temp
+    TS=[]
+    for i in x:
+        TSi=np.array(STCSM(i,a,b))*i
+        TSi2=float(TSi)
+        TS.append(TSi2)
+    return TS
+def GTCSM(x,a,b):
+    # Chen-Sundman Workshop model contribution to Gibbs
+    # param x Temp. range
+    # param a fit term from model
+    # param b fit term from model
+    # return CS model contribution to Gibbs
+    H=np.array(HTCSM(x,a,b))-HTCSM(298.15,a,b)
+    #print(H[0],type(H),len(H))
+    TS=np.array(TSCSM(x,a,b))
+    #print(TS[0],type(TS),len(TS))
+    G=H-TS
+    return G
+
+#' Gibbs_BCM
+#'
+#' @param x Temp range
+#' @param A1 parameter
+#' @param A2 parameter
+#' @param TE1 parameter
+#' @param TE2 parameter
+#'
+#' @return Gibbs_LCE
+def GSRLCMagn(x,TE):
+    if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+        G = Gein(TE,x) + GTBCM(x, RTDB_globals['k1_final'],RTDB_globals['k2_final'],RTDB_globals['alfa_final'],RTDB_globals['g_final'])
+    else:
+        G = Gein(TE,x) + GTBCM(x, RTDB_globals['k1_final'],RTDB_globals['k2_final'],RTDB_globals['alfa_final'],RTDB_globals['g_final']) + GM_Bosse(x)
+    return G
+
+# This is named as if it was still LCE but its not
+#' @param x Temp range
+#' @param TE1 parameter
+#' 
+#'
+#' @return Enthalpy for x < TM
+#Translated not checked
+def HSRLCMagn(x, TE1):
+    #does not work because Einstein, try a debye model?
+    if(RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0 ):
+        HSR =  HEin(TE1, x) + HTBCM(x, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
+    else:
+        HSR = HEin(TE1, x) + HTBCM(x, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final']) + HM(x)
+    return HSR
+
+#' Entropy for x < TM
+#'
+
+# This is named as if it was still LCE but its not
+#' @param x Temp range
+#' @param TE1 parameter
+#' 
+#'
+#' @return Entropy for x < TM
+#Translated not checked
+def SSRLCMagn(x, TE1):
+    if(RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0 ):
+        SSR =  SEin(TE1, x) + STBCM(x, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
+    else:
+        SSR = HEin(TE1, x) + STBCM(x, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final']) + SM(x)
+    return SSR
+
+def H0(x):
+    #' Calculate H0
+    #'
+    #' @param x Temp range
+    #'
+    #' @return Calculate H0
+    #Translated not checked
+    CP_TM = float(CpMelt())
+    Hz = []
+    try:
+        len(x)
+    except TypeError:
+        H_calc = CP_TM*(x-RTDB_globals['a_sig']*np.sqrt((RTDB_globals['a_sig']**2.0+RTDB_globals['TM']**2.0-2.0*RTDB_globals['TM']*x+x**2.0)/RTDB_globals['a_sig']**2.0))+RTDB_globals['FC']*RTDB_globals['a_sig']*np.sqrt((RTDB_globals['a_sig']**2.0+RTDB_globals['TM']**2.0-2.0*RTDB_globals['TM']*x+x**2)/RTDB_globals['a_sig']**2)
+        Hz.append(H_calc)
+    else:
+        for i in x: #[for every value of x]
+            H_calc = CP_TM*(i-RTDB_globals['a_sig']*np.sqrt((RTDB_globals['a_sig']**2.0+RTDB_globals['TM']**2.0-2.0*RTDB_globals['TM']*i+i**2.0)/RTDB_globals['a_sig']**2.0))+RTDB_globals['FC']*RTDB_globals['a_sig']*np.sqrt((RTDB_globals['a_sig']**2.0+RTDB_globals['TM']**2.0-2.0*RTDB_globals['TM']*i+i**2)/RTDB_globals['a_sig']**2)
+            Hz.append(H_calc)
+    return Hz
+
+#HM currently problem child
+def autoH(T, def_model):
+    if def_model == "CSModelE":
+        print('cs')
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+            HCS=HTCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
+        else:
+            HCS=HTCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])+HM(T)
+        H_val=HCS+HEin(CSE,T_plot)
+    elif def_model == "RWModelE":
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+        #print('rw',RTDB_globals['polya'],RTDB_globals['polyb'])
+            HRW=HTRWM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
+        else:
+            HRW=HTRWM(T,RTDB_globals['polya'],RTDB_globals['polyb'])+HM(T)
+        H_val=HRW+HEin(RTDB_globals['Te_final'],T)
+    elif def_model == "SRModelE":
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+            HBCM=HTBCM(T, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
+        else:
+            HBCM=HTBCM(T, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])+HM(T)
+        H_val=HEin(RTDB_globals['Te_final'],T)+HBCM
+
+    return H_val
+
+def autoS(T, def_model):
+    if def_model == "CSModelE":
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+            SCS=STCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
+        else:
+            SCS=STCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])+SM(T)
+        H_val=HCS+SEin(CSE,T)
+    elif def_model == "RWModelE":
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+            SRW=STRWM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
+        else:
+            SRW=STRWM(T,RTDB_globals['polya'],RTDB_globals['polyb'])+SM(T)
+        S_val=SRW+SEin(RTDB_globals['Te_final'],T)
+    elif def_model == "SRModelE":
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+            SBCM=STBCM(T_plot, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
+        else:
+            SBCM=STBCM(T_plot, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])+SM(T)
+        S_val=SEin(RTDB_globals['Te_final'],T)+SBCM
+    return S_val
+
+
+# +GibbsM_Bosse(T) or GM_Bosse(T) do figure this out homie
+def autoG(T, def_model):
+    if def_model == "CSModelE":
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+        print('cs')
+            GCS=GTCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
+            G_val=GCS+GEin(RTDB_globals['Te_final'],T)
+        else:
+            GCS=GTCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
+            G_val=GCS+GEin(RTDB_globals['Te_final'],T)+GibbsM_Bosse(T)
+    elif def_model == "RWModelE":
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+            GRW=GTRWM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
+            G_val=GRW+GEin(RTDB_globals['Te_final'],T)
+        else:
+            GRW=GTRWM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
+            G_val=GRW+GEin(RTDB_globals['Te_final'],T)+GibbsM_Bosse(T)
+    elif def_model == "SRModelE":
+        print('sr')
+        if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
+            GBCM=GTBCM(T_plot, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
+            GBCM2=[]
+            for i in range(len(GBCM)):
+                GBCM2.append(GBCM[i][0])
+            G_val=GEin(RTDB_globals['Te_final'],T)+GBCM2
+        else:
+            GBCM=GTBCM(T_plot, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
+            GBCM2=[]
+            for i in range(len(GBCM)):
+                GBCM2.append(GBCM[i][0])
+            G_val=GEin(RTDB_globals['Te_final'],T)+GBCM2+GibbsM_Bosse(T)
+    return G_val
