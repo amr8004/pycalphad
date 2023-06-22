@@ -2109,7 +2109,6 @@ def H0(x):
 #HM currently problem child
 def autoH(T, def_model):
     if def_model == "CSModelE":
-        print('cs')
         if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
             HCS=HTCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
         else:
