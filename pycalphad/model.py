@@ -2157,7 +2157,6 @@ def autoS(T, def_model):
 def autoG(T, def_model):
     if def_model == "CSModelE":
         if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
-        print('cs')
             GCS=GTCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
             G_val=GCS+GEin(RTDB_globals['Te_final'],T)
         else:
