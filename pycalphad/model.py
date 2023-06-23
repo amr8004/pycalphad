@@ -12,6 +12,8 @@ from pycalphad.core.constants import MIN_SITE_FRACTION
 from pycalphad.core.utils import unpack_components, get_pure_elements, wrap_symbol
 import numpy as np
 from collections import OrderedDict
+import pycalphad.pure_element.DB_load as PEDB
+#FIX THAT ABOVE
 
 # Maximum number of levels deep we check for symbols that are functions of
 # other symbols
@@ -1481,6 +1483,149 @@ class TestModel(Model):
 
 
 # AMR PURE ELEMENT models
+def pe_dict():
+    print('test')
+    global RTDB_globals
+    global df
+RTDB_globals = {}
+df = []
+# Input parameters
+RTDB_globals['element'] = None
+RTDB_globals['TM'] = None
+RTDB_globals['Th'] = None
+RTDB_globals['a_sig'] = None
+RTDB_globals['FC'] = None
+RTDB_globals['bta'] = None
+RTDB_globals['p'] = None
+RTDB_globals['Tc'] = None
+RTDB_globals['Ph'] = None
+RTDB_globals['S_BP1'] = None
+RTDB_globals['S_BP2'] = None
+RTDB_globals['S_BP3'] = None
+RTDB_globals['S_BP4'] = None
+RTDB_globals['L_BP1'] = None
+RTDB_globals['L_BP2'] = None
+RTDB_globals['L_BP3'] = None
+RTDB_globals['L_BP4'] = None
+RTDB_globals['constituent_1'] = None
+RTDB_globals['constituent_2'] = None
+RTDB_globals['constituent_3'] = None
+# SGTE parameters
+# Solid phase
+RTDB_globals['S_a1'] = None
+RTDB_globals['S_b1'] = None
+RTDB_globals['S_c1'] = None
+RTDB_globals['S_d1'] = None
+RTDB_globals['S_e1'] = None
+RTDB_globals['S_f1'] = None
+RTDB_globals['S_g1'] = None
+RTDB_globals['S_h1'] = None
+RTDB_globals['S_a2'] = None
+RTDB_globals['S_b2'] = None
+RTDB_globals['S_c2'] = None
+RTDB_globals['S_d2'] = None
+RTDB_globals['S_e2'] = None
+RTDB_globals['S_f2'] = None
+RTDB_globals['S_g2'] = None
+RTDB_globals['S_h2'] = None
+RTDB_globals['S_a3'] = None
+RTDB_globals['S_b3'] = None
+RTDB_globals['S_c3'] = None
+RTDB_globals['S_d3'] = None
+RTDB_globals['S_e3'] = None
+RTDB_globals['S_f3'] = None
+RTDB_globals['S_g3'] = None
+RTDB_globals['S_h3'] = None
+RTDB_globals['S_a4'] = None
+RTDB_globals['S_b4'] = None
+RTDB_globals['S_c4'] = None
+RTDB_globals['S_d4'] = None
+RTDB_globals['S_e4'] = None
+RTDB_globals['S_f4'] = None
+RTDB_globals['S_g4'] = None
+RTDB_globals['S_h4'] = None
+# Liquid phase
+RTDB_globals['L_a1'] = None
+RTDB_globals['L_b1'] = None
+RTDB_globals['L_c1'] = None
+RTDB_globals['L_d1'] = None
+RTDB_globals['L_e1'] = None
+RTDB_globals['L_f1'] = None
+RTDB_globals['L_g1'] = None
+RTDB_globals['L_h1'] = None
+RTDB_globals['L_a2'] = None
+RTDB_globals['L_b2'] = None
+RTDB_globals['L_c2'] = None
+RTDB_globals['L_d2'] = None
+RTDB_globals['L_e2'] = None
+RTDB_globals['L_f2'] = None
+RTDB_globals['L_g2'] = None
+RTDB_globals['L_h2'] = None
+RTDB_globals['L_a3'] = None
+RTDB_globals['L_b3'] = None
+RTDB_globals['L_c3'] = None
+RTDB_globals['L_d3'] = None
+RTDB_globals['L_e3'] = None
+RTDB_globals['L_f3'] = None
+RTDB_globals['L_g3'] = None
+RTDB_globals['L_h3'] = None
+RTDB_globals['L_a4'] = None
+RTDB_globals['L_b4'] = None
+RTDB_globals['L_c4'] = None
+RTDB_globals['L_d4'] = None
+RTDB_globals['L_e4'] = None
+RTDB_globals['L_f4'] = None
+RTDB_globals['L_g4'] = None
+RTDB_globals['L_h4'] = None
+# Calculated parameters
+RTDB_globals['polya'] = None
+RTDB_globals['polyb'] = None
+RTDB_globals['Td_final'] = None
+RTDB_globals['k1_final'] = None
+RTDB_globals['k2_final'] = None
+RTDB_globals['alfa_final'] = None
+RTDB_globals['g_final'] = None
+RTDB_globals['Te_final'] = None
+RTDB_globals['LCE_A1_final'] = None
+RTDB_globals['LCE_A2_final'] = None
+RTDB_globals['LCE_TE1_final'] = None
+RTDB_globals['LCE_TE2_final'] = None
+RTDB_globals['diffSR'] = None
+RTDB_globals['a_GL'] = None
+RTDB_globals['b_GL'] = None
+RTDB_globals['C_GL'] = None
+RTDB_globals['d_GL'] = None
+# TDB writer parameters
+RTDB_globals['El'] = None
+RTDB_globals['Ref'] = None
+#return
+
+def Define_Element(element, TM=None, Th=None, a_sig=None, FC=None, bta=None, p=None, Tc=None, Ph=None):
+    DBU = PEDB.db_unary
+    #print(db_PE_Unary)
+    #print(os.getcwdb())
+    #DBU = json.load(DBU1)
+    if type(element[0]) != str:
+        ele2=str(element[0])
+    else:
+        ele2=(element[0])
+    def_ele = DBU[ele2]
+
+    RTDB_globals['element'] = element
+    vals = {'TM': TM, 'Th': Th, 'a_sig': a_sig, 'FC': FC, 'bta': bta, 'p': p, 'Tc': Tc, 'Ph': Ph}
+
+    for key, val in vals.items():
+        if val:
+            RTDB_globals[key] = val
+        else:
+            RTDB_globals[key] = def_ele[key]
+
+    others = ['S_BP1', 'S_BP2', 'S_BP3', 'S_BP4', 'L_BP1', 'L_BP2', 'L_BP3', 'L_BP4', 'constituent_1', 'constituent_2',
+              'constituent_3']
+    for key in others:
+        RTDB_globals[key] = def_ele[key]
+    return RTDB_globals
+
 #EINSTEIN model
 """ This model will be moved to pycalphad later
 """
@@ -2171,15 +2316,15 @@ def autoG(T, def_model):
     elif def_model == "SRModelE":
         print('sr')
         if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
-            GBCM=GTBCM(T_plot, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
+            GBCM=GTBCM(T, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
             GBCM2=[]
             for i in range(len(GBCM)):
-                GBCM2.append(GBCM[i][0])
+                GBCM2.append(GBCM[i])#[0])
             G_val=GEin(RTDB_globals['Te_final'],T)+GBCM2
         else:
-            GBCM=GTBCM(T_plot, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
+            GBCM=GTBCM(T, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
             GBCM2=[]
             for i in range(len(GBCM)):
-                GBCM2.append(GBCM[i][0])
+                GBCM2.append(GBCM[i])#[0])
             G_val=GEin(RTDB_globals['Te_final'],T)+GBCM2+GibbsM_Bosse(T)
     return G_val
