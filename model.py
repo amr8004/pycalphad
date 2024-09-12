@@ -2060,11 +2060,17 @@ def GM_Bosse(x):
 
 # RW model H, S, G
 def HTRWM(x, a, b):
-    # Ringwald Workshop model contribution to Enthalpy
-    # param x Temp. range
-    # param a fit term from model
-    # param b fit term from model
-    # return RW model contribution to enthalpy
+    """
+    Ringberg Workshop model contribution to Enthalpy.
+
+    Args:
+        x (float or list): Temperature range.
+        a (float): Fit term from the model.
+        b (float): Fit term from the model.
+
+    Returns:
+        list: RW model contribution to enthalpy.
+    """
     H = []
     R = 8.314
     try:
@@ -2078,11 +2084,17 @@ def HTRWM(x, a, b):
             H.append(Hi)
     return H
 def STRWM(x,a,b):
-    # Ringwald Workshop model contribution to Entropy
-    # param x Temp. range
-    # param a fit term from model
-    # param b fit term from model
-    # return RW model contribution to entropy
+    """
+    Ringberg Workshop model contribution to Entropy.
+
+    Args:
+        x (float or list): Temperature range.
+        a (float): Fit term from the model.
+        b (float): Fit term from the model.
+
+    Returns:
+        list: RW model contribution to entropy.
+    """
     S = []
     S0=0
     try:
@@ -2097,11 +2109,17 @@ def STRWM(x,a,b):
             S.append(Si)
     return S
 def TSRWM(x,a,b):
-    # Ringwald Workshop model contribution to Entropy * temperature for G calculation
-    # param x Temp. range
-    # param a fit term from model
-    # param b fit term from model
-    # return RW model contribution to entropy
+    """
+    Ringberg Workshop model contribution of Entropy multiplied by temperature for calculation of Gibbs.
+
+    Args:
+        x (float or list): Temperature range.
+        a (float): Fit term from the model.
+        b (float): Fit term from the model.
+
+    Returns:
+        array: RW model contribution of entropy multiplied by temperature.
+    """
     TS=[]
     for i in x:
         TSi=np.array(STRWM(i,a,b))*i
@@ -2109,11 +2127,17 @@ def TSRWM(x,a,b):
         TS.append(TSi2)
     return TS
 def GTRWM(x,a,b):
-    # Ringwald Workshop model contribution to Gibbs Energy
-    # param x Temp. range
-    # param a fit term from model
-    # param b fit term from model
-    # return RW model contribution to Gibbs Energy
+    """
+    Ringberg Workshop model contribution to Gibbs Energy.
+
+    Args:
+        x (list)): Temperature range.
+        a (float): Fit term from the model.
+        b (float): Fit term from the model.
+
+    Returns:
+        array: RW model contribution to Gibbs Energy.
+    """
     H=np.array(HTRWM(x,a,b))-HTRWM(298.15,a,b)
     print(H[0],type(H),len(H))
     TS=np.array(TSRWM(x,a,b))
@@ -2123,11 +2147,17 @@ def GTRWM(x,a,b):
 
 # CS model H, S, G
 def HTCSM(x,a,b):
-    # Chen-Sundman Workshop model contribution to Enthalpy
-    # param x Temp. range
-    # param a fit term from model
-    # param b fit term from model
-    # return CS model contribution to enthalpy
+    """
+    Chen-Sundman Workshop model contribution to enthalpy.
+
+    Args:
+        x (float or list): Temperature range.
+        a (float): Fit term from the model.
+        b (float): Fit term from the model.
+
+    Returns:
+        list: CS model contribution to enthalpy.
+    """
     H = []
     try:
         len(x)
@@ -2140,11 +2170,17 @@ def HTCSM(x,a,b):
             H.append(Hi)
     return H
 def STCSM(x,a,b):
-    # Chen-Sundman Workshop model contribution to Entropy
-    # param x Temp. range
-    # param a fit term from model
-    # param b fit term from model
-    # return CS model contribution to entropy
+    """
+    Chen-Sundman Workshop model contribution to entropy.
+
+    Args:
+        x (float or list): Temperature range.
+        a (float): Fit term from the model.
+        b (float): Fit term from the model.
+
+    Returns:
+        list: CS model contribution to entropy.
+    """
     S = []
     #S0=0
     try:
@@ -2159,17 +2195,39 @@ def STCSM(x,a,b):
             S.append(Si)
     return S
 def TSCSM(x,a,b):
-    # Chen-Sundman Workshop model contribution to Entropy multiplied by Temp for Gibbs Calculation
-    # param x Temp. range
-    # param a fit term from model
-    # param b fit term from model
-    # return CS model contribution to entropy*Temp
+    """
+    Chen-Sundman Workshop model contribution to entropy multiplied by Temp for Gibbs calculation.
+
+    Args:
+        x (list): Temperature range.
+        a (float): Fit term from the model.
+        b (float): Fit term from the model.
+
+    Returns:
+        array: CS model contribution to entropy.
+    """
     TS=[]
     for i in x:
         TSi=np.array(STCSM(i,a,b))*i
         TSi2=float(TSi)
         TS.append(TSi2)
     return TS
+def GTCSM(x, a, b):
+    """
+    Chen-Sundman Workshop model contribution to Gibbs.
+
+    Args:
+        x (list): Temperature range.
+        a (float): Fit term from the model.
+        b (float): Fit term from the model.
+
+    Returns:
+        array: CS model contribution to Gibbs.
+    """
+    H = np.array(HTCSM(x, a, b)) - HTCSM(298.15, a, b)
+    TS = np.array(TSCSM(x, a, b))
+    G = H - TS
+    return G
 def GTCSM(x,a,b):
     # Chen-Sundman Workshop model contribution to Gibbs
     # param x Temp. range
@@ -2183,48 +2241,57 @@ def GTCSM(x,a,b):
     G=H-TS
     return G
 
-#' Gibbs_BCM
-#'
-#' @param x Temp range
-#' @param A1 parameter
-#' @param A2 parameter
-#' @param TE1 parameter
-#' @param TE2 parameter
-#'
-#' @return Gibbs_LCE
 def GSRLCMagn(x,TE):
+    """
+    Calculate the enthalpy for a given temperature range and einstein parameter.
+
+    Args:
+        x (list): Temperature range.
+        TE (float): Parameter.
+
+    Returns:
+        array: Gibbs for x 
+    """
     if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
         G = Gein(TE,x) + GTBCM(x, RTDB_globals['k1_final'],RTDB_globals['k2_final'],RTDB_globals['alfa_final'],RTDB_globals['g_final'])
     else:
         G = Gein(TE,x) + GTBCM(x, RTDB_globals['k1_final'],RTDB_globals['k2_final'],RTDB_globals['alfa_final'],RTDB_globals['g_final']) + GM_Bosse(x)
     return G
 
-# This is named as if it was still LCE but its not
-#' @param x Temp range
-#' @param TE1 parameter
-#' 
-#'
-#' @return Enthalpy for x < TM
-#Translated not checked
+
 def HSRLCMagn(x, TE1):
-    #does not work because Einstein, try a debye model?
+    """
+    Calculate the enthalpy for a given temperature range and parameter.
+
+    Args:
+        x (float): Temperature range.
+        TE1 (float): Parameter.
+
+    Returns:
+        array: Enthalpy for x < TM.
+    """
+    # This is named as if it was still LCE but its not
+    # Translated not checked
+    # does not work because Einstein, try a debye model?
     if(RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0 ):
         HSR =  HEin(TE1, x) + HTBCM(x, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
     else:
         HSR = HEin(TE1, x) + HTBCM(x, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final']) + HM(x)
     return HSR
 
-#' Entropy for x < TM
-#'
 
-# This is named as if it was still LCE but its not
-#' @param x Temp range
-#' @param TE1 parameter
-#' 
-#'
-#' @return Entropy for x < TM
-#Translated not checked
 def SSRLCMagn(x, TE1):
+    """
+    Calculate the total SSR (Solid Solution Residual) for a given composition and temperature.
+
+    Parameters:
+    x (list): temperature range.
+    TE1 (float): Einstein parameter.
+
+    Returns:
+    array: entropy for x < melting T.
+
+    """
     if(RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0 ):
         SSR =  SEin(TE1, x) + STBCM(x, RTDB_globals['k1_final'], RTDB_globals['k2_final'], RTDB_globals['alfa_final'], RTDB_globals['g_final'])
     else:
@@ -2232,12 +2299,16 @@ def SSRLCMagn(x, TE1):
     return SSR
 
 def H0(x):
-    #' Calculate H0
-    #'
-    #' @param x Temp range
-    #'
-    #' @return Calculate H0
-    #Translated not checked
+    '''
+    Calculate H0
+
+    Parameters:
+    x (float or list): Temp range
+
+    Returns:
+    array: Calculated H0 values
+    '''
+
     CP_TM = float(CpMelt())
     Hz = []
     try:
@@ -2251,8 +2322,22 @@ def H0(x):
             Hz.append(H_calc)
     return Hz
 
-#HM currently problem child
+
 def autoH(T, def_model):
+    """
+    Calculate the total enthalpy (H) based on the given temperature (T) and model.
+
+    Parameters:
+    T (list): A list of temperatures.
+    def_model (str): The model to use for calculating enthalpy. Valid options are "CSModelE", "RWModelE", and "SRModelE".
+
+    Returns:
+    array: The total enthalpy (H) value.
+
+    Raises:
+    ValueError: If an invalid model is provided.
+
+    """
     if def_model == "CSModelE":
         if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
             HCS=HTCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
@@ -2276,6 +2361,20 @@ def autoH(T, def_model):
     return H_val
 
 def autoS(T, def_model):
+    """
+    Calculate the entropy (S) based on the given temperature (T) and model.
+
+    Parameters:
+    T (list): A list of temperatures.
+    def_model (str): The model to use for entropy calculation. Valid options are "CSModelE", "RWModelE", and "SRModelE".
+
+    Returns:
+    array: The calculated entropy value.
+
+    Raises:
+    ValueError: If an invalid model is provided.
+
+    """
     if def_model == "CSModelE":
         if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
             SCS=STCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
@@ -2299,6 +2398,19 @@ def autoS(T, def_model):
 
 # +GibbsM_Bosse(T) or GM_Bosse(T) do figure this out homie
 def autoG(T, def_model):
+    """
+    Calculate the Gibbs free energy for a given temperature and model.
+
+    Parameters:
+    T (list): Temperature in Kelvin.
+    def_model (str): Model name. Valid options are "CSModelE", "RWModelE", and "SRModelE".
+
+    Returns:
+    list: The calculated Gibbs free energies.
+
+    Raises:
+    ValueError: If an invalid model name is provided.
+    """
     if def_model == "CSModelE":
         if RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0:
             GCS=GTCSM(T,RTDB_globals['polya'],RTDB_globals['polyb'])
