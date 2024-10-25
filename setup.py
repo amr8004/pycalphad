@@ -34,7 +34,7 @@ setup(
     author_email='richard.otis@outlook.com',
     description='CALPHAD tools for designing thermodynamic models, calculating phase diagrams and investigating phase equilibria.',
     # Do NOT include pycalphad._dev here. It is for local development and should not be distributed.
-    packages=['pycalphad', 'pycalphad.codegen', 'pycalphad.core', 'pycalphad.io', 'pycalphad.plot', 'pycalphad.plot.binary', 'pycalphad.tests', 'pycalphad.tests.databases', 'pycalphad.models'],
+    packages=['pycalphad', 'pycalphad.codegen', 'pycalphad.core', 'pycalphad.io', 'pycalphad.plot', 'pycalphad.plot.binary', 'pycalphad.tests', 'pycalphad.tests.databases', 'pycalphad.models', 'pycalphad.pure_element'],
     ext_modules=cythonize(
         CYTHON_EXTENSION_MODULES,
         include_path=CYTHON_EXTENSION_INCLUDES,
@@ -43,6 +43,7 @@ setup(
     package_data={
         'pycalphad.core': ['*.pxd'] + (['*.pyx', '*.c', '*.h', '*.cpp', '*.hpp'] if os.getenv('CYTHON_COVERAGE', False) else []),
         'pycalphad.tests.databases': ['*'],
+        'pycalphad.pure_element': ['*']
     },
     # This include is for the compiler to find the *.h files during the build_ext phase
     # the include must contain a symengine directory with header files
