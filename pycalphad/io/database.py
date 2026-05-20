@@ -2,12 +2,14 @@
 The database module provides support for reading and writing data types
 associated with structured thermodynamic/kinetic data.
 """
+from typing import Any, TypedDict
 from io import StringIO
 from tinydb import TinyDB
 from tinydb.storages import MemoryStorage
 from datetime import datetime
 from collections import namedtuple
 import os
+from symengine import Expr
 from pycalphad.variables import Species
 from pycalphad.core.cache import fhash
 from pycalphad.core.utils import recursive_tuplify
@@ -52,6 +54,7 @@ class Phase(object): #pylint: disable=R0903
         return hash((self.name, self.constituents, tuple(self.sublattices),
                      tuple(sorted(recursive_tuplify(self.model_hints.items())))))
 
+ElementReferenceData = TypedDict('ElementReferenceData', {'phase': str, 'mass': float, "H298": float, "S298": float})
 DatabaseFormat = namedtuple('DatabaseFormat', ['read', 'write'])
 format_registry = {}
 
@@ -60,19 +63,6 @@ class Database(object): #pylint: disable=R0902
     """
     Structured thermodynamic and/or kinetic data.
 
-    Attributes
-    ----------
-    elements : set
-        Set of elements in database.
-    species : set
-        Set of species in database.
-    phases : dict
-        Phase objects indexed by their system-local name.
-    symbols : dict
-        SymEngine objects indexed by their name (FUNCTIONs in Thermo-Calc).
-    references : dict
-        Reference objects indexed by their system-local identifier.
-
     Examples
     --------
     >>> mydb = Database(open('crfeni_mie.tdb'))
@@ -80,6 +70,21 @@ class Database(object): #pylint: disable=R0902
     >>> f = StringIO(u'$a complete TDB file as a string\\n')
     >>> mydb = Database(f)
     """
+
+    elements: set[str]
+    """Set of elements in database."""
+    species: set[Species]
+    """Set of species in database."""
+    phases: dict[str, Phase]
+    """Phase objects indexed by their system-local name."""
+    symbols: dict[str, Expr]
+    """SymEngine objects indexed by their name (FUNCTIONs in Thermo-Calc)."""
+    refstates: dict[str, ElementReferenceData]
+    """Mapping of elements to their reference data"""
+    references: dict[str, Any]
+    """Reference objects indexed by their system-local identifier."""
+    _structure_dict: dict[str, Any]
+
     def __new__(cls, *args):
         if len(args) == 0:
             obj = super(Database, cls).__new__(cls, *args)
@@ -107,7 +112,7 @@ class Database(object): #pylint: disable=R0902
                     fmt = ext[1:].lower()
             except (AttributeError, TypeError):
                 pass
-            if hasattr(fname, 'read'):
+            if hasattr(fname, 'read') or hasattr(fname, 'open'):
                 # File descriptor
                 return cls.from_file(fname, fmt=fmt)
             elif fname.find('\n') == -1:
@@ -118,6 +123,10 @@ class Database(object): #pylint: disable=R0902
                 return cls.from_string(fname, fmt=fmt)
         else:
             raise ValueError('Invalid number of parameters: '+len(args))
+
+    @classmethod
+    def cast_from(cls, val):
+        return cls(val)
 
     def __hash__(self):
         return fhash(self.__dict__)
