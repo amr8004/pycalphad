@@ -4,6 +4,7 @@ The test_model module contains unit tests for the Model object.
 from pycalphad import Database, Model, variables as v, equilibrium
 from pycalphad.tests.fixtures import select_database, load_database
 from pycalphad.core.errors import DofError
+from symengine import Piecewise
 import numpy as np
 import pickle
 import pytest
@@ -80,8 +81,8 @@ def test_degree_of_ordering(load_database):
     comps = ['AL', 'FE', 'VA']
     conds = {v.T: 300, v.P: 101325, v.X('AL'): 0.25}
     eqx = equilibrium(dbf, comps, my_phases, conds, output='degree_of_ordering', verbose=True)
-    print('Degree of ordering: {}'.format(eqx.degree_of_ordering.sel(vertex=0).values.flatten()))
-    assert np.isclose(eqx.degree_of_ordering.sel(vertex=0).values.flatten(), np.array([0.6666]), atol=1e-4)
+    print('Degree of ordering: {}'.format(eqx.degree_of_ordering.values.flatten()))
+    assert np.isclose(eqx.degree_of_ordering.values.flatten(), np.array([0.6666]), atol=1e-4)
 
 def test_detect_pure_vacancy_phases():
     "Detecting a pure vacancy phase"
@@ -162,3 +163,101 @@ def test_order_disorder_interstital_sublattice_validation():
     # as the substitutional and cannot be distinguished
     with pytest.raises(ValueError):
         Model(DBF_OrderDisorder_broken, ["A", "B", "VA"], "ORD_SUBS_INSTL")
+
+@pytest.mark.filterwarnings("ignore:The order-disorder model for \"ORD_FCC\" has a contribution from the physical property model*:UserWarning")
+@select_database("FeNi_deep_branching.tdb")
+def test_model_deep_branching(load_database):
+    "Models with very deep piecewise branching are optimized at construction time"
+    dbf = load_database()
+    mod = Model(dbf, ['FE', 'NI', 'VA'], 'ORD_FCC')
+    # All we really care about is that the energy Hessian will calculate without hanging
+    # However, that is a relatively long test. This just checks that the deep branches were cleaned up.
+    # Without optimization/unwrapping, this would be about 57
+    assert len(mod.GM.atoms(Piecewise)) < 30
+
+def test_model_extrapolate_temperature():
+    "Models extrapolate temperature bounds outside upper/lower limits"
+    TDB_extrapolate = """
+    ELEMENT VA   VACUUM   0.0000E+00  0.0000E+00  0.0000E+00 !
+    ELEMENT A    DISORD     0.0000E+00  0.0000E+00  0.0000E+00 !
+    ELEMENT B    DISORD     0.0000E+00  0.0000E+00  0.0000E+00 !
+
+    FUNCTION GSYM1  500 +100;  5000.00 Y 40000; 10000 N !
+
+    DEFINE_SYSTEM_DEFAULT ELEMENT 2 !
+    DEFAULT_COMMAND DEF_SYS_ELEMENT VA !
+
+    TYPE_DEFINITION % SEQ *!
+    TYPE_DEFINITION ' GES A_P_D ORDERED DIS_PART DISORD ,,,!
+
+    PHASE DISORD  %  2 1   3 !
+    PHASE ORDERED %'  3 0.5  0.5  3  !
+
+    CONSTITUENT DISORD  : A,B : VA :  !
+    CONSTITUENT ORDERED  : A,B: A,B : VA :  !
+
+    PARAMETER G(DISORD,A:VA;0)  298.15  -10000+GSYM1#; 1000 Y -3000-GSYM1#; 6000 N !
+    PARAMETER G(DISORD,B:VA;0)  298.15  -10000+GSYM1#; 1000 Y -3000-GSYM1#; 6000 N !
+
+    """
+    dbf = Database(TDB_extrapolate)
+    # First, confirm that turning the extrapolation off reproduces the correct behavior
+    class modtype(Model):
+        extrapolate_temperature_bounds = False
+    mod = modtype(dbf, ['A', 'B', 'VA'], 'ORDERED')
+    # Remove ideal mixing effects so we can test extrapolation easily
+    mod.models['idmix'] = 0
+    dof = {v.Y('ORDERED', 0, 'A'): 0.5, v.Y('ORDERED', 0, 'B'): 0.5,
+               v.Y('ORDERED', 1, 'A'): 0.5, v.Y('ORDERED', 1, 'B'): 0.5,
+               v.Y('ORDERED', 2, 'VA'): 1.0}
+    assert mod.GM.subs(dof).subs({v.T: 200}).n(real=True) == 0.
+    assert mod.GM.subs(dof).subs({v.T: 50000}).n(real=True) == 0.
+
+    # Next, test that the default behavior (extrapolation) works as intended
+    mod = Model(dbf, ['A', 'B', 'VA'], 'ORDERED')
+    # Remove ideal mixing effects so we can test extrapolation easily
+    mod.models['idmix'] = 0
+    dof = {v.Y('ORDERED', 0, 'A'): 0.5, v.Y('ORDERED', 0, 'B'): 0.5,
+               v.Y('ORDERED', 1, 'A'): 0.5, v.Y('ORDERED', 1, 'B'): 0.5,
+               v.Y('ORDERED', 2, 'VA'): 1.0}
+    assert mod.GM.subs(dof).subs({v.T: 200}).n(real=True) == -9900.
+    assert mod.GM.subs(dof).subs({v.T: 50000}).n(real=True) == -43000.
+
+def test_error_raised_for_higher_order_reciprocal_parameter():
+    """
+    The composition dependent reciprocal parameter on more than two sublattices
+    should not be supported and should raise an error if a database has these parameters
+    """
+    test_tdb = """
+    ELEMENT VA   VACUUM                    0.0000E+00  0.0000E+00  0.0000E+00!
+    ELEMENT C    GRAPHITE                  1.2011E+01  1.0540E+03  5.7423E+00!
+    ELEMENT MO   BCC_A2                    9.5940E+01  4.5890E+03  2.8560E+01!
+    ELEMENT NB   BCC_A2                    9.2906E+01  5.2200E+03  3.6270E+01!
+    ELEMENT AL   BCC_A2                    9.2906E+01  5.2200E+03  3.6270E+01!
+
+    PHASE PHASE_CORRECT % 3 1 1 1 !
+    CONSTITUENT PHASE_CORRECT : MO,NB : NB,AL : C,VA : !
+
+    PARAMETER G(PHASE_CORRECT,MO,NB:NB,AL:C,VA;0) 298.15 -300000; 6000 N !
+
+    PHASE PHASE_SUBLATTICE % 3 1 1 1 !
+    CONSTITUENT PHASE_SUBLATTICE : MO,NB : NB,AL : C,VA : !
+
+    PARAMETER G(PHASE_SUBLATTICE,MO,NB:NB,AL:C,VA;1) 298.15 -300000; 6000 N !
+
+    PHASE PHASE_HIGH_ORDER % 3 1 1 1 !
+    CONSTITUENT PHASE_HIGH_ORDER : MO,NB : C,VA : !
+
+    PARAMETER G(PHASE_HIGH_ORDER,MO,NB:C,VA;3) 298.15 -300000; 6000 N !
+    """
+    dbf = Database(test_tdb)
+    # Check that a model with 0th order reciprocal parameter loads correctly
+    mod = Model(dbf, ["AL", "MO", "NB", "C", "VA"], "PHASE_CORRECT")
+
+    # Check that a model with a higher order reciprocal parameter on three sublattices throws an error
+    with pytest.raises(ValueError):
+        mod = Model(dbf, ["AL", "MO", "NB", "C", "VA"], "PHASE_SUBLATTICE")
+
+    # Check that a model with a higher order reciprocal parameter > 2 throws an error
+    with pytest.raises(ValueError):
+        mod = Model(dbf, ["MO", "NB", "C", "VA"], "PHASE_HIGH_ORDER")

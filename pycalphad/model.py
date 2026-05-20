@@ -9,11 +9,17 @@ from tinydb import where
 import pycalphad.variables as v
 from pycalphad.core.errors import DofError
 from pycalphad.core.constants import MIN_SITE_FRACTION
-from pycalphad.core.utils import unpack_components, get_pure_elements, wrap_symbol
+from pycalphad.core.utils import unpack_species, get_pure_elements, wrap_symbol
+from pycalphad.io.tdb import get_supported_variables
 import numpy as np
 from collections import OrderedDict
 import pycalphad.pure_element.DB_load as PEDB
 #FIX THAT ABOVE
+try:
+    # needs Python 3.13+
+    from warnings import deprecated
+except ImportError:
+    from typing_extensions import deprecated
 
 # Maximum number of levels deep we check for symbols that are functions of
 # other symbols
@@ -99,6 +105,12 @@ class ReferenceState():
             s = "ReferenceState('{}', '{}')".format(self.species.name, self.phase_name)
         return s
 
+class classproperty(object):
+    # https://stackoverflow.com/questions/5189699/how-to-make-a-class-property
+    def __init__(self, f):
+        self.f = f
+    def __get__(self, obj, owner):
+        return self.f(owner)
 
 class Model(object):
     """
@@ -156,6 +168,13 @@ class Model(object):
                      ('2st', 'twostate_energy'), ('ein', 'einstein_energy'),
                      ('vol', 'volume_energy'), ('ord', 'atomic_ordering_energy')]
 
+    # Behave as if piecewise temperature bounds extend to +-inf (i.e., ignore lower/upper T limits for parameters)
+    # This follows the behavior of most commercial codes, but may be undesirable in some circumstances
+    # Designed to be readonly on instances, because mutation after initialization will not work
+    @classproperty
+    def extrapolate_temperature_bounds(cls):
+        return True
+
     def __new__(cls, *args, **kwargs):
         target_cls = cls._dispatch_on(*args, **kwargs)
         instance = object.__new__(target_cls)
@@ -181,7 +200,7 @@ class Model(object):
         self.phase_name = phase_name.upper()
         phase = dbe.phases[self.phase_name]
         self.site_ratios = list(phase.sublattices)
-        active_species = unpack_components(dbe, comps)
+        active_species = unpack_species(dbe, comps)
         for idx, sublattice in enumerate(phase.constituents):
             subl_comps = set(sublattice).intersection(active_species)
             self.components |= subl_comps
@@ -258,13 +277,52 @@ class Model(object):
 
         for name, value in self.models.items():
             # XXX: xreplace hack because SymEngine seems to let Symbols slip in somehow
-            self.models[name] = self.symbol_replace(value, symbols).xreplace(v.supported_variables_in_databases)
+            self.models[name] = self.symbol_replace(value, symbols).xreplace(get_supported_variables())
 
         self.site_fractions = sorted([x for x in self.variables if isinstance(x, v.SiteFraction)], key=str)
         self.state_variables = sorted([x for x in self.variables if not isinstance(x, v.SiteFraction)], key=str)
 
-    @staticmethod
-    def symbol_replace(obj, symbols):
+    @classmethod
+    def unwrap_piecewise(cls, graph):
+        from pycalphad.io.tdb import to_interval
+        replace_dict = {}
+        for atom in graph.atoms(Piecewise):
+            args = atom.args
+            # Unwrap temperature-dependent piecewise with zero-defaults
+            if len(args) == 4 and args[2] == 0 and args[3] == True and args[1].free_symbols == {v.T}:
+                replace_dict[atom] = args[0]
+            elif cls.extrapolate_temperature_bounds:
+                # Set lower and upper temperature limits to -+infinity
+                # First filter out default zero-branches
+                filtered_args = [(x, cond) for x, cond in zip(*[iter(args)]*2) if not ((cond == S.true) and (x == S.Zero))]
+                if len(filtered_args) == 0:
+                    continue
+                if not all([cond.free_symbols == {v.T} for _, cond in filtered_args]):
+                    # Only temperature-dependent piecewise conditions are supported for extrapolation
+                    continue
+                intervals = [to_interval(cond) for _, cond in filtered_args]
+                sortindices = [i[0] for i in sorted(enumerate(intervals), key=lambda x:x[1].args[0])]
+                if (intervals[sortindices[0]].args[0] == S.NegativeInfinity) and \
+                   (intervals[sortindices[-1]].args[1] == S.Infinity):
+                    # Nothing to do, temperature range already extrapolated
+                    continue
+                # First branch is special-cased to negative infinity
+                exprcondpairs = [(filtered_args[sortindices[0]][0], v.T < intervals[sortindices[0]].args[1])]
+                for idx in sortindices[1:-1]:
+                    exprcondpairs.append((filtered_args[sortindices[idx]][0],
+                                         And(v.T >= intervals[sortindices[idx]].args[0], v.T < intervals[sortindices[idx]].args[1])
+                    ))
+                # Last branch is special-cased to positive infinity
+                exprcondpairs.append((filtered_args[sortindices[-1]][0],
+                                      v.T >= intervals[sortindices[-1]].args[0]
+                ))
+                # Catch-all branch required for LLVM (should never hit in this formulation)
+                exprcondpairs.append((0, True))
+                replace_dict[atom] = Piecewise(*exprcondpairs)
+        return graph.xreplace(replace_dict)
+
+    @classmethod
+    def symbol_replace(cls, obj, symbols):
         """
         Substitute values of symbols into 'obj'.
 
@@ -282,6 +340,7 @@ class Model(object):
             # of other symbols
             for iteration in range(_MAX_PARAM_NESTING):
                 obj = obj.xreplace(symbols)
+                obj = cls.unwrap_piecewise(obj)
                 undefs = [x for x in obj.free_symbols if not isinstance(x, v.StateVariable)]
                 if len(undefs) == 0:
                     break
@@ -382,6 +441,7 @@ class Model(object):
     formulaenergy = G = property(lambda self: self.ast * self._site_ratio_normalization)
     entropy = SM = property(lambda self: -self.GM.diff(v.T))
     enthalpy = HM = property(lambda self: self.GM - v.T*self.GM.diff(v.T))
+    formulaenthalpy = H = property(lambda self: self.G - v.T*self.G.diff(v.T))
     heat_capacity = CPM = property(lambda self: -v.T*self.GM.diff(v.T, v.T))
     #pylint: enable=C0103
     mixing_energy = GM_MIX = property(lambda self: self.GM - self.endmember_reference_model.GM)
@@ -659,6 +719,10 @@ class Model(object):
         for param in params:
             # iterate over every sublattice
             mixing_term = S.One
+            param_subl_dof = [len(subl) for subl in param["constituent_array"]]
+            mixing_sublattice_indices = [subl_index for subl_index, dof in enumerate(param_subl_dof) if dof > 1]
+            if len(mixing_sublattice_indices) > 1 and max(param_subl_dof) > 2:
+                raise ValueError(f"Parameters with mixing on multiple sublattices cannot include interactions beyond binary. Got mixing on {len(mixing_sublattice_indices)} sublattices with one sublattice having mixing between {max(param_subl_dof)} constituents for parameter {param}.")
             for subl_index, comps in enumerate(param['constituent_array']):
                 comp_symbols = None
                 # convert strings to symbols
@@ -710,9 +774,23 @@ class Model(object):
                     mixing_term *= Mul(*comp_symbols)
                 # is this a higher-order interaction parameter?
                 if len(comps) == 2 and param['parameter_order'] > 0:
-                    # interacting sublattice, add the interaction polynomial
-                    mixing_term *= Pow(comp_symbols[0] - \
-                        comp_symbols[1], param['parameter_order'])
+                    # multiply in (y_A - y_B) terms
+                    if len(mixing_sublattice_indices) == 1:
+                        # Normal R-K interaction parameter for mixing on one sublattice
+                        mixing_term *= Pow(comp_symbols[0] - comp_symbols[1], param['parameter_order'])
+                    elif len(mixing_sublattice_indices) == 2:
+                        # We have a reciprocal parameter
+                        # Similar to the ternary case, the parameter order has a special meaning for reciprocal parameters.
+                        # We only multiply by (y_A - y_B) if the sublattice corresponds to a specific parameter order
+                        # See Eq 5.99 in Section 5.8.1 of Lukas, Fries and Sundman [2].
+                        # Testing with Thermo-Calc indicates that that L1 corresponds to the second sublattice
+                        # with mixing and L2 corresponds to the first sublattice with mixing.
+                        if param['parameter_order'] > 2:  # L0 case doesn't have a (yA - yB) term
+                            raise ValueError(f"Reciprocal parameters can only use parameter order 0, 1, or 2. Got {param['parameter_order']} for {param}.")
+                        if subl_index == mixing_sublattice_indices[-param['parameter_order']]:
+                            mixing_term *= (comp_symbols[0] - comp_symbols[1])
+                    else:
+                        raise ValueError(f"Reciprocal interaction parameters beyond order L0 for more than 2 sublattices are not supported. Got mixing on {len(mixing_sublattice_indices)} sublattices for parameter {param}.")
                 if len(comps) == 3:
                     # 'parameter_order' is an index to a variable when
                     # we are in the ternary interaction parameter case
@@ -1119,7 +1197,7 @@ class Model(object):
         return disord_expr + ordering_expr
 
     def atomic_ordering_energy(self, dbe):
-        """
+        r"""
         Return the atomic ordering contribution in symbolic form.
 
         If the current phase is anything other than the ordered phase in a
@@ -1143,6 +1221,13 @@ class Model(object):
 
            3. Physical properties are partitioned in the same way as the
            energy. See Section 5.8.6 of Lukas, Fries and Sundman [2]_.
+
+           4. There is a variant of the partitioning model for phases that never
+           undergo disordering. See Section 5.8.5 of Lukas, Fries and
+           Sundman [2]_. In this variant, the entropy from the disordered phase
+           does not contribute to the energy and the ordering energies does not
+           have to go to zero, i.e.
+           :math:`\Delta G^\mathrm{ord}(y_i) = G^\mathrm{ord}(y_i)`.
 
         Notes
         -----
@@ -1168,12 +1253,16 @@ class Model(object):
         phase = dbe.phases[self.phase_name]
         ordered_phase_name = phase.model_hints.get('ordered_phase', None)
         disordered_phase_name = phase.model_hints.get('disordered_phase', None)
+        never_disorder = phase.model_hints.get('never_disorder', False)
         if phase.name != ordered_phase_name:
             return S.Zero
         ordered_phase = dbe.phases[ordered_phase_name]
         constituents = [sorted(set(c).intersection(self.components)) for c in ordered_phase.constituents]
         disordered_phase = dbe.phases[disordered_phase_name]
         disordered_model = self.__class__(dbe, sorted(self.components), disordered_phase_name)
+        if never_disorder:
+            # Take configurational entropy from the ordered phase only
+            disordered_model.models["idmix"] = S.Zero
 
         # Get substitutional sublattice indices (for the ordered phase) and
         # validate that the number of interstitial sublattices is consistent
@@ -1197,12 +1286,21 @@ class Model(object):
         num_ordered_interstitial_subls = len(ordered_phase.sublattices) - num_substitutional_sublattice_idxs
         num_disordered_interstitial_subls = len(disordered_phase.sublattices) - 1
         if num_ordered_interstitial_subls != num_disordered_interstitial_subls:
+            import textwrap
             raise ValueError(
-                f'Number of interstitial sublattices for the disordered phase '
-                f'({num_disordered_interstitial_subls}) and the ordered phase '
-                f'({num_ordered_interstitial_subls}) do not match. Got '
-                f'substitutional sublattice indices of {substitutional_sublattice_idxs}.'
-                )
+                textwrap.dedent(
+                f"""
+                Number of interstitial sublattices for the disordered phase
+                 {disordered_phase_name} ({num_disordered_interstitial_subls})
+                 and the ordered phase {ordered_phase_name}
+                 ({num_ordered_interstitial_subls}) do not match. Found substitutional
+                 sublattices in the ordered phase with indices of
+                 {substitutional_sublattice_idxs}. Ensure that all the constituents in
+                 the substitutional sublattices for the disordered and ordered phase
+                 match exactly and the constituents in the interstitial sublattices for
+                 the disordered and ordered phase match exactly.
+                """
+                ).replace("\n", ""))
         # We also validate that no physical properties have ordered
         # contributions because the underlying physical property needs to
         # paritioned and substituted for the physical property in the disordered
@@ -1267,7 +1365,13 @@ class Model(object):
         # contributions. There's no technical reason for doing it this way
         # compared to setting the AST to the _partitioned_expr for the total
         # energy - this is more for bookkeeping of the model contributions.
-        ordering_energy = self._partitioned_expr(S.Zero, ordered_energy, {}, molefraction_dict)
+        if never_disorder:
+            # Models that never disorder don't need to subtract out the
+            # ordering energy at disordered site fractions.
+            # See Lukas, Fries, Sundman Eq. 5.162
+            ordering_energy = ordered_energy
+        else:
+            ordering_energy = self._partitioned_expr(S.Zero, ordered_energy, {}, molefraction_dict)
 
         # 2: Replace the ordered energy contributions with the disordered contributions
         self.models.clear()
@@ -1288,14 +1392,14 @@ class Model(object):
 
         return ordering_energy
 
-    # TODO: fix case for VA interactions: L(PHASE,A,VA:VA;0)-type parameters
+    @deprecated("shift_reference_state is deprecated. Use `pycalphad.property_framework.ReferenceState` instead.")
     def shift_reference_state(self, reference_states, dbe, contrib_mods=None, output=('GM', 'HM', 'SM', 'CPM'), fmt_str="{}R"):
         """
         Add new attributes for calculating properties w.r.t. an arbitrary pure element reference state.
 
         Parameters
         ----------
-        reference_states : Iterable of ReferenceState
+        reference_states : Iterable of pycalphad.model.ReferenceState
             Pure element ReferenceState objects. Must include all the pure
             elements defined in the current model.
         dbe : Database
@@ -1360,7 +1464,7 @@ class Model(object):
             reference_contrib = Add(*terms)
             referenced_value = getattr(self, out) - reference_contrib
             setattr(self, fmt_str.format(out), referenced_value)
-    
+
     def volume_energy(self, dbe):
         """
         Return the volumetric contribution in symbolic form. Follows the approach by Lu, Selleby, and Sundman [1].
@@ -1369,7 +1473,7 @@ class Model(object):
         ----------
         dbe : Database
             Database containing the relevant parameters.
-        
+
         Notes
         -----
         The high-pressure portion of the model is not currently implemented.
@@ -1408,10 +1512,13 @@ class Model(object):
             (where('constituent_array').test(self._array_validity))
         )
 
-        V0 = self.redlich_kister_sum(phase, param_search, V0_param_query)
-        VA = self.redlich_kister_sum(phase, param_search, VA_param_query)
-        VK = self.redlich_kister_sum(phase, param_search, VK_param_query)
-        VC = self.redlich_kister_sum(phase, param_search, VC_param_query)
+        # V0 is given in databases per mole of formula, so we should normalize it
+        self.V0 = V0 = self.symbol_replace(self.redlich_kister_sum(phase, param_search, V0_param_query) / self._site_ratio_normalization, self._symbols)
+        # VA is given in databases per mole of atoms, so we should not normalize it
+        self.VA = VA = self.symbol_replace(self.redlich_kister_sum(phase, param_search, VA_param_query), self._symbols)
+        # TODO: unsure about the normalization of VK and VC parameters
+        self.VK = VK = self.symbol_replace(self.redlich_kister_sum(phase, param_search, VK_param_query), self._symbols)
+        self.VC = VC = self.symbol_replace(self.redlich_kister_sum(phase, param_search, VC_param_query), self._symbols)
 
         # nonmagnetic contribution to volume
         V_p0 = V0*exp(VA)
@@ -1420,7 +1527,7 @@ class Model(object):
         G_mag = self.models.get('mag')
         V_mag = G_mag.diff(v.P)
 
-        self.MV = self.molar_volume = V_p0 + V_mag
+        self.VM = self.molar_volume = V_p0 + V_mag
         volume_energy = S.Zero
 
         if VK == 0:
@@ -1473,8 +1580,8 @@ class TestModel(Model):
         self.solution = dict(list(zip(variables, solution)))
         kmax = kmax if kmax is not None else 2
         scale_factor = 1e4 * len(self.components)
-        ampl_scale = 1e3 * np.ones(kmax, dtype=np.float_)
-        freq_scale = 10 * np.ones(kmax, dtype=np.float_)
+        ampl_scale = 1e3 * np.ones(kmax, dtype=np.float64)
+        freq_scale = 10 * np.ones(kmax, dtype=np.float64)
         polys = Add(*[ampl_scale[i] * sin(freq_scale[i] * Add(*[Add(*[(varname - sol)**(j+1)
                                                                       for varname, sol in self.solution.items()])
                                                                 for j in range(kmax)]))**2
