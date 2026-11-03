@@ -1976,6 +1976,201 @@ def GEin(Te,x):
     Ge = koef*(x*np.log(np.exp(Te/x)-1)-Te) - HEin(Te, 298.15)
     return Ge
 
+# =============================================================================
+# PSEUDO-DEBYE lattice model (Holzapfel approximation; Brosh, JPED 46 (2025)
+# 357-365, doi:10.1007/s11669-025-01201-7). Drop-in replacement for the
+# Einstein term in RW / CS / SR. Conventions match HEin/SEin/GEin: H has no
+# zero-point term and G is referenced to H(298.15 K).
+# =============================================================================
+PD_R = 8.314
+PD_AD = 5.0 / np.pi**4          # a_D, gives the exact Debye T^3 law
+# Weights fitted to the exact Debye Cv (max |dCv|/3R = 2.5e-4, max rel 1.4 %).
+# Swap in Brosh's Table 1 set for exact paper fidelity; f2 always comes from Eq. 4.
+PD_W0 = 0.05544097
+PD_W1 = 0.04116359
+PD_F1 = 0.41824600
+
+
+def PD_f2(w0=PD_W0, w1=PD_W1, f1=PD_F1):
+    """Brosh Eq. 4: f2 that reproduces the Debye high-T entropy constant."""
+    w2 = 1.0 - w0 - w1
+    return np.exp(-(w1 / w2) * np.log(f1) - 1.0 / (3.0 * w2)
+                  - (w0 / (3.0 * w2)) * np.log(PD_AD * w0))
+
+
+PD_W2 = 1.0 - PD_W0 - PD_W1
+PD_F2 = PD_f2()
+
+
+def _pd_parts(Td, T):
+    T = np.asarray(T, dtype=float)
+    u = T**3 / (PD_AD * PD_W0 * Td**3)
+    return T, u, PD_F1 * Td / T, PD_F2 * Td / T
+
+
+def PseudoDebye(Td, T):
+    """Lattice heat capacity, J/mol/K. Same call signature as Einstein(Te, T)."""
+    scalar = np.isscalar(T)
+    T, u, y1, y2 = _pd_parts(Td, T)
+    ein = lambda y: y**2 * np.exp(-y) / np.expm1(-y)**2
+    cv = 3 * PD_R * (PD_W0 * (u / (1 + u) + 3 * u / (1 + u)**2)
+                     + PD_W1 * ein(y1) + PD_W2 * ein(y2))
+    return float(cv) if scalar else cv
+
+
+def HPD(Td, x):
+    """Pseudo-Debye enthalpy U(T)-U(0), J/mol. Mirrors HEin(Te, x)."""
+    scalar = np.isscalar(x)
+    T, u, y1, y2 = _pd_parts(Td, x)
+    h = 3 * PD_R * (PD_W0 * T * u / (1 + u)
+                    + PD_W1 * PD_F1 * Td / np.expm1(y1)
+                    + PD_W2 * PD_F2 * Td / np.expm1(y2))
+    return float(h) if scalar else h
+
+
+def SPD(Td, x):
+    """Pseudo-Debye entropy, J/mol/K. Mirrors SEin(Te, x)."""
+    scalar = np.isscalar(x)
+    T, u, y1, y2 = _pd_parts(Td, x)
+    se = lambda y: y / np.expm1(y) - np.log(-np.expm1(-y))
+    s = PD_R * (PD_W0 * (np.log1p(u) + 3 * u / (1 + u))
+                + 3 * PD_W1 * se(y1) + 3 * PD_W2 * se(y2))
+    return float(s) if scalar else s
+
+
+def GPD(Td, x):
+    """Pseudo-Debye Gibbs energy H - TS - H(298.15), J/mol. Mirrors GEin(Te, x)."""
+    return HPD(Td, x) - np.asarray(x, dtype=float) * SPD(Td, x) - HPD(Td, 298.15)
+
+
+def TDB_GPD(Td, name='GPDEB'):
+    """TDB FUNCTION line for GPD (LN/EXP only; pycalphad and Thermo-Calc parse it)."""
+    c0 = PD_AD * PD_W0 * Td**3
+    return (f" FUNCTION {name} 1.0 -{PD_R}*T*{PD_W0:.10g}*LN(1+T**3*{1.0 / c0:.10E})"
+            f"+{3 * PD_R * PD_W1:.10g}*T*LN(1-EXP({-PD_F1 * Td:.10g}*T**(-1)))"
+            f"+{3 * PD_R * PD_W2:.10g}*T*LN(1-EXP({-PD_F2 * Td:.10g}*T**(-1)))"
+            f"-{HPD(Td, 298.15):.10g}; 6000.0 N !")
+
+
+def _bent_cable_cp(T, k1, k2, alfa, g):
+    """Vectorised bent-cable Cp (same piecewise form as model_SRE)."""
+    T = np.asarray(T, dtype=float)
+    return np.where(T < alfa - g, k1 * T,
+                    np.where(T > alfa + g, k1 * T + k2 * (T - alfa),
+                             k1 * T + k2 * (T - alfa + g)**2 / (4 * g)))
+
+
+def _is_nonmagnetic():
+    return RTDB_globals['bta'] == 0 or RTDB_globals['p'] == 0 or RTDB_globals['Tc'] == 0
+
+
+def _add_magnetic(cp, T):
+    if _is_nonmagnetic():
+        return cp
+    return cp + np.asarray(CpMBosse(T), dtype=float)
+
+
+# --- Debye versions of the three 3rd-generation models ----------------------
+def RWModelD(x, *param):
+    """Ringberg form with pseudo-Debye: Cp = C_D(Td) + a T + b T^2 (+ magnetic)."""
+    Td, a, b = param[0], param[1], param[2]
+    RTDB_globals['Td_final'] = Td
+    RTDB_globals['polya'] = a
+    RTDB_globals['polyb'] = b
+    T = np.asarray(x, dtype=float)
+    return _add_magnetic(PseudoDebye(Td, T) + a * T + b * T**2, T)
+
+
+def CSModelD(x, *param):
+    """Chen-Sundman form with pseudo-Debye: Cp = C_D(Td) + a T + b T^4 (+ magnetic)."""
+    Td, a, b = param[0], param[1], param[2]
+    RTDB_globals['Td_final'] = Td
+    RTDB_globals['polya'] = a
+    RTDB_globals['polyb'] = b
+    T = np.asarray(x, dtype=float)
+    return _add_magnetic(PseudoDebye(Td, T) + a * T + b * T**4, T)
+
+
+def SRModelD(x, *param):
+    """Segmented regression with pseudo-Debye: Cp = C_D(Td) + bent cable (+ magnetic)."""
+    Td, k1, k2, alfa, g = param[:5]
+    RTDB_globals['Td_final'] = Td
+    RTDB_globals['k1_final'] = k1
+    RTDB_globals['k2_final'] = k2
+    RTDB_globals['alfa_final'] = alfa
+    RTDB_globals['g_final'] = g
+    T = np.asarray(x, dtype=float)
+    return _add_magnetic(PseudoDebye(Td, T) + _bent_cable_cp(T, k1, k2, alfa, g), T)
+
+
+# --- Brosh's own formulation (Eqs. 7-8) -------------------------------------
+# Cp = C_D(Td) + gamma T + (a1 - gamma) T [1 - exp(-T/Tt)] + a2 T^2 + a3 T^3 + a4 T^4
+# gamma (low-T electronic coefficient) is fixed from literature, not fitted:
+# set RTDB_globals['gamma_el'] before fitting (defaults to 0).
+RTDB_globals.setdefault('gamma_el', 0.0)
+
+
+def BroshModelD(x, *param):
+    Td, Tt, a1, a2, a3, a4 = param[:6]
+    gam = RTDB_globals.get('gamma_el') or 0.0
+    RTDB_globals.update(Td_final=Td, Tt_final=Tt, a1_final=a1,
+                        a2_final=a2, a3_final=a3, a4_final=a4)
+    T = np.asarray(x, dtype=float)
+    cp = (PseudoDebye(Td, T) + gam * T + (a1 - gam) * T * (-np.expm1(-T / Tt))
+          + a2 * T**2 + a3 * T**3 + a4 * T**4)
+    return _add_magnetic(cp, T)
+
+
+def HBrosh(x, Tt, a1, a2, a3, a4, gam=None):
+    """Non-Debye part of Brosh H, integrated from 0 K."""
+    gam = (RTDB_globals.get('gamma_el') or 0.0) if gam is None else gam
+    T = np.asarray(x, dtype=float); b = a1 - gam
+    return (gam * T**2 / 2 + b * (T**2 / 2 - Tt**2 + Tt * (T + Tt) * np.exp(-T / Tt))
+            + a2 * T**3 / 3 + a3 * T**4 / 4 + a4 * T**5 / 5)
+
+
+def SBrosh(x, Tt, a1, a2, a3, a4, gam=None):
+    gam = (RTDB_globals.get('gamma_el') or 0.0) if gam is None else gam
+    T = np.asarray(x, dtype=float); b = a1 - gam
+    return (gam * T + b * (T + Tt * np.expm1(-T / Tt))
+            + a2 * T**2 / 2 + a3 * T**3 / 3 + a4 * T**4 / 4)
+
+
+def GBrosh(x, Tt, a1, a2, a3, a4, gam=None):
+    """Brosh Eq. 8 non-Debye part, referenced to H(298.15) like the other G helpers."""
+    T = np.asarray(x, dtype=float)
+    return (HBrosh(T, Tt, a1, a2, a3, a4, gam) - T * SBrosh(T, Tt, a1, a2, a3, a4, gam)
+            - HBrosh(298.15, Tt, a1, a2, a3, a4, gam))
+
+
+def _mag(fn, T):
+    return 0.0 if _is_nonmagnetic() else np.asarray(fn(T), dtype=float)
+
+
+def autoG_D(T, def_model):
+    """Lattice + polynomial (+ magnetic) Gibbs energy for the Debye models."""
+    Td = RTDB_globals['Td_final']
+    T = np.asarray(T, dtype=float)
+    a, b = RTDB_globals['polya'], RTDB_globals['polyb']
+    # closed forms of GTRWM / GTCSM (those helpers call float() on 1-element
+    # arrays, which NumPy >= 2 rejects)
+    if def_model == 'RWModelD':      # Cp = aT + bT^2
+        H = lambda t: a * t**2 / 2 + b * t**3 / 3
+        G = H(T) - T * (a * T + b * T**2 / 2) - H(298.15)
+    elif def_model == 'CSModelD':    # Cp = aT + bT^4
+        H = lambda t: a * t**2 / 2 + b * t**5 / 5
+        G = H(T) - T * (a * T + b * T**4 / 4) - H(298.15)
+    elif def_model == 'SRModelD':
+        G = np.asarray(GTBCM(T, RTDB_globals['k1_final'], RTDB_globals['k2_final'],
+                             RTDB_globals['alfa_final'], RTDB_globals['g_final']), dtype=float)
+    elif def_model == 'BroshModelD':
+        G = GBrosh(T, *(RTDB_globals[k] for k in ('Tt_final', 'a1_final', 'a2_final',
+                                                  'a3_final', 'a4_final')))
+    else:
+        raise ValueError(f"Unknown Debye model {def_model}")
+    return GPD(Td, T) + G + _mag(GibbsM_Bosse, T)
+
+
 # Bent Cable Model ONLY H, S, G
 def HTBCM(x, k1, k2, alfa, g):
     #' Enthalpy SR model
